@@ -1,0 +1,95 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  passwordHash String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  watchlists Watchlist[]
+}
+
+model Watchlist {
+  id        String   @id @default(uuid())
+  userId    String
+  name      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user  User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  items WatchlistItem[]
+
+  @@index([userId])
+}
+
+model WatchlistItem {
+  id           String   @id @default(uuid())
+  watchlistId  String
+  instrumentId String
+  position     Int
+  createdAt    DateTime @default(now())
+
+  watchlist  Watchlist  @relation(fields: [watchlistId], references: [id], onDelete: Cascade)
+  instrument Instrument @relation(fields: [instrumentId], references: [id])
+
+  @@unique([watchlistId, instrumentId])
+  @@index([watchlistId, position])
+}
+
+model Instrument {
+  id             String   @id @default(uuid())
+  symbol         String
+  name           String
+  exchange       String
+  providerSymbol String
+  createdAt      DateTime @default(now())
+
+  watchlistItems WatchlistItem[]
+  latestQuote    LatestQuote?
+  candles        OhlcvCandle[]
+
+  @@unique([symbol, exchange])
+  @@index([symbol])
+  @@index([name])
+}
+
+model LatestQuote {
+  instrumentId      String   @id
+  price             Decimal  @db.Decimal(18, 6)
+  change            Decimal  @db.Decimal(18, 6)
+  changePercent     Decimal  @db.Decimal(9, 4)
+  providerTimestamp DateTime
+  ingestedAt        DateTime
+
+  instrument Instrument @relation(fields: [instrumentId], references: [id], onDelete: Cascade)
+}
+
+enum CandleInterval {
+  intraday_5m
+  daily
+}
+
+model OhlcvCandle {
+  id           String         @id @default(uuid())
+  instrumentId String
+  interval     CandleInterval
+  timestamp    DateTime
+  open         Decimal        @db.Decimal(18, 6)
+  high         Decimal        @db.Decimal(18, 6)
+  low          Decimal        @db.Decimal(18, 6)
+  close        Decimal        @db.Decimal(18, 6)
+  volume       BigInt
+
+  instrument Instrument @relation(fields: [instrumentId], references: [id], onDelete: Cascade)
+
+  @@unique([instrumentId, interval, timestamp])
+  @@index([instrumentId, interval, timestamp])
+}
