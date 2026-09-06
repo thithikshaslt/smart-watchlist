@@ -6,6 +6,7 @@ import { AuthModule } from './auth/auth.module';
 import { InstrumentsModule } from './instruments/instruments.module';
 import { MarketDataModule } from './market-data/market-data.module';
 import { PrismaModule } from './prisma/prisma.module';
+import { SmartInsightsModule } from './smart-insights/smart-insights.module';
 import { UsersModule } from './users/users.module';
 import { WatchlistsModule } from './watchlists/watchlists.module';
 
@@ -19,6 +20,7 @@ import { WatchlistsModule } from './watchlists/watchlists.module';
     InstrumentsModule,
     MarketDataModule,
     WatchlistsModule,
+    SmartInsightsModule,
   ],
   controllers: [AppController],
 })

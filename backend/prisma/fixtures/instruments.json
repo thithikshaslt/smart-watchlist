@@ -1,4 +1,5 @@
 [
+  { "symbol": "SPY", "name": "SPDR S&P 500 ETF Trust", "exchange": "NYSE" },
   { "symbol": "AAPL", "name": "Apple Inc.", "exchange": "NASDAQ" },
   { "symbol": "MSFT", "name": "Microsoft Corporation", "exchange": "NASDAQ" },
   { "symbol": "GOOGL", "name": "Alphabet Inc. Class A", "exchange": "NASDAQ" },

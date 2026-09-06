@@ -11,6 +11,15 @@ export interface QuoteView {
   providerTimestamp: Date;
   ingestedAt: Date;
   freshness: FreshnessStatus;
+  /**
+   * High/low and volume from the most recently completed daily candle, for
+   * the optional "day range"/"volume" display-lens metrics. Sourced from the
+   * last completed trading day, not a live running total for today - reusing
+   * existing OHLCV storage rather than adding a new ingested field. Null
+   * until at least one daily candle has been ingested for the instrument.
+   */
+  dayRange: { high: number; low: number } | null;
+  volume: number | null;
 }
 
 export interface CandleView {
@@ -50,6 +59,11 @@ export class MarketDataService {
       return null;
     }
 
+    const latestDailyCandle = await this.prisma.ohlcvCandle.findFirst({
+      where: { instrumentId, interval: CandleInterval.daily },
+      orderBy: { timestamp: 'desc' },
+    });
+
     return {
       instrumentId: quote.instrumentId,
       price: Number(quote.price),
@@ -58,6 +72,13 @@ export class MarketDataService {
       providerTimestamp: quote.providerTimestamp,
       ingestedAt: quote.ingestedAt,
       freshness: computeFreshness(quote.ingestedAt),
+      dayRange: latestDailyCandle
+        ? {
+            high: Number(latestDailyCandle.high),
+            low: Number(latestDailyCandle.low),
+          }
+        : null,
+      volume: latestDailyCandle ? Number(latestDailyCandle.volume) : null,
     };
   }
 

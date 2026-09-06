@@ -110,6 +110,84 @@ describe('WatchlistDetailPage', () => {
     await waitFor(() => expect(screen.queryByText('AAPL')).not.toBeInTheDocument())
   })
 
+  it('records exactly one visit on mount, independent of how many times the page re-renders', async () => {
+    let visitCallCount = 0
+    server.use(
+      http.get('http://localhost:3000/watchlists/wl-1', () =>
+        HttpResponse.json(watchlistWithItems),
+      ),
+      http.post('http://localhost:3000/watchlists/wl-1/visits', () => {
+        visitCallCount += 1
+        return HttpResponse.json({
+          previousViewedAt: null,
+          items: [],
+          summary: { notableCount: 0, broadMarketCount: 0 },
+        })
+      }),
+    )
+    mockQuote()
+
+    const { rerender } = renderDetailRoute()
+    await waitFor(() => expect(screen.getByText('AAPL')).toBeInTheDocument())
+    await waitFor(() => expect(visitCallCount).toBe(1))
+
+    // Re-render the same route (simulating an unrelated re-render, e.g. from
+    // a background quote refetch) - the mount effect keys on watchlistId
+    // alone, so it must not fire again.
+    rerender(
+      <Routes>
+        <Route path="/watchlists/:id" element={<WatchlistDetailPage />} />
+        <Route path="/watchlists" element={<div>Watchlists list view</div>} />
+      </Routes>,
+    )
+    await waitFor(() => expect(screen.getByText('AAPL')).toBeInTheDocument())
+    expect(visitCallCount).toBe(1)
+  })
+
+  it("shows the since-last-visit digest and a notable badge from the visit response", async () => {
+    server.use(
+      http.get('http://localhost:3000/watchlists/wl-1', () =>
+        HttpResponse.json(watchlistWithItems),
+      ),
+      http.post('http://localhost:3000/watchlists/wl-1/visits', () =>
+        HttpResponse.json({
+          previousViewedAt: '2026-01-01T09:40:00.000Z',
+          items: [{ instrumentId: 'inst-aapl', classification: 'notable' }],
+          summary: { notableCount: 1, broadMarketCount: 0 },
+        }),
+      ),
+    )
+    mockQuote()
+
+    renderDetailRoute()
+
+    await waitFor(() =>
+      expect(screen.getByText(/1 notable move/)).toBeInTheDocument(),
+    )
+    expect(screen.getByText(/Notable/)).toBeInTheDocument()
+  })
+
+  it('shows no digest on a watchlist first visit', async () => {
+    server.use(
+      http.get('http://localhost:3000/watchlists/wl-1', () =>
+        HttpResponse.json(watchlistWithItems),
+      ),
+      http.post('http://localhost:3000/watchlists/wl-1/visits', () =>
+        HttpResponse.json({
+          previousViewedAt: null,
+          items: [{ instrumentId: 'inst-aapl', classification: null }],
+          summary: { notableCount: 0, broadMarketCount: 0 },
+        }),
+      ),
+    )
+    mockQuote()
+
+    renderDetailRoute()
+
+    await waitFor(() => expect(screen.getByText('AAPL')).toBeInTheDocument())
+    expect(screen.queryByText(/Since your last visit/)).not.toBeInTheDocument()
+  })
+
   it('shows a not-found state for a watchlist the user does not own or that does not exist', async () => {
     server.use(
       http.get('http://localhost:3000/watchlists/wl-missing', () =>

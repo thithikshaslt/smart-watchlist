@@ -15,6 +15,7 @@ import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { AddWatchlistItemDto } from './dto/add-watchlist-item.dto';
 import { CreateWatchlistDto } from './dto/create-watchlist.dto';
 import { ReorderWatchlistItemsDto } from './dto/reorder-watchlist-items.dto';
+import { SetWatchlistViewDto } from './dto/set-watchlist-view.dto';
 import { UpdateWatchlistDto } from './dto/update-watchlist.dto';
 import { WatchlistsService } from './watchlists.service';
 
@@ -84,5 +85,14 @@ export class WatchlistsController {
     @Body() dto: ReorderWatchlistItemsDto,
   ) {
     return this.watchlistsService.reorder(user.id, id, dto.instrumentIds);
+  }
+
+  @Patch(':id/view')
+  setView(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+    @Body() dto: SetWatchlistViewDto,
+  ) {
+    return this.watchlistsService.setViewLens(user.id, id, dto.metrics);
   }
 }

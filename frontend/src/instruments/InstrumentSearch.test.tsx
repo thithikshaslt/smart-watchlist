@@ -81,7 +81,7 @@ describe('InstrumentSearch', () => {
     expect(searchHandler).not.toHaveBeenCalled()
   })
 
-  it('adds a result to the watchlist and confirms it', async () => {
+  it('adds a result and clears the search, ready for the next lookup', async () => {
     server.use(
       http.get('http://localhost:3000/instruments/search', () =>
         HttpResponse.json([msft]),
@@ -94,16 +94,17 @@ describe('InstrumentSearch', () => {
     renderWithProviders(
       <InstrumentSearch watchlistId="wl-1" existingInstrumentIds={[]} />,
     )
+    const input = screen.getByLabelText('Search instruments')
 
-    await user.type(screen.getByLabelText('Search instruments'), 'MSFT')
+    await user.type(input, 'MSFT')
     await waitFor(() => expect(screen.getByText('MSFT')).toBeInTheDocument())
 
     await user.click(screen.getByRole('button', { name: 'Add' }))
 
-    await waitFor(() =>
-      expect(screen.queryByRole('button', { name: 'Add' })).not.toBeInTheDocument(),
-    )
-    expect(screen.getByText('Already added')).toBeInTheDocument()
+    // The field resets on its own - the next search shouldn't require
+    // backspacing out what was just typed.
+    await waitFor(() => expect(input).toHaveValue(''))
+    await waitFor(() => expect(screen.queryByText('MSFT')).not.toBeInTheDocument())
   })
 
   it('marks an already-added instrument and does not allow re-adding it', async () => {

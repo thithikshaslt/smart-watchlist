@@ -48,6 +48,8 @@ describe('WatchlistsService', () => {
     id: watchlistId,
     userId,
     name: 'Tech',
+    lastViewedAt: null,
+    viewLens: null,
     createdAt: new Date(),
     updatedAt: new Date(),
     items,
@@ -101,6 +103,45 @@ describe('WatchlistsService', () => {
       expect(prisma.watchlist.findFirst).toHaveBeenCalledWith(
         expect.objectContaining({ where: { id: watchlistId, userId } }),
       );
+    });
+
+    it('is a pure read that never touches lastViewedAt (visit tracking is a separate, explicit action)', async () => {
+      prisma.watchlist.findFirst.mockResolvedValue(watchlistWithItems([]));
+
+      await service.getOwned(userId, watchlistId);
+
+      expect(prisma.watchlist.update).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('setViewLens', () => {
+    it('persists the selected metrics and returns the watchlist with its items intact', async () => {
+      prisma.watchlist.findFirst.mockResolvedValue(
+        watchlistWithItems([item('aapl', 0)]),
+      );
+
+      const result = await service.setViewLens(userId, watchlistId, [
+        'price',
+        'volume',
+      ]);
+
+      expect(prisma.watchlist.update).toHaveBeenCalledWith({
+        where: { id: watchlistId },
+        data: { viewLens: ['price', 'volume'] },
+      });
+      // Regression guard: an earlier version returned the bare `update()`
+      // result (no `items`), which the frontend caches directly over the
+      // watchlist-with-items query - wiping the visible item list.
+      expect(result.items).toHaveLength(1);
+    });
+
+    it('throws NotFoundException without updating when the caller does not own the watchlist', async () => {
+      prisma.watchlist.findFirst.mockResolvedValue(null);
+
+      await expect(
+        service.setViewLens(userId, watchlistId, ['price']),
+      ).rejects.toBeInstanceOf(NotFoundException);
+      expect(prisma.watchlist.update).not.toHaveBeenCalled();
     });
   });
 

@@ -14,6 +14,14 @@ describe('Smart Watchlist backend (e2e)', () => {
   let prisma: PrismaService;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let server: any;
+  // e2e runs against the same dev database the app itself uses (no separate
+  // test DB configured), so cleanup MUST only ever touch users this run
+  // created - `deleteMany({})` here would wipe every real account too.
+  const createdEmails: string[] = [];
+  function trackEmail(email: string): string {
+    createdEmails.push(email);
+    return email;
+  }
 
   beforeAll(async () => {
     const moduleFixture: TestingModule = await Test.createTestingModule({
@@ -39,8 +47,12 @@ describe('Smart Watchlist backend (e2e)', () => {
   });
 
   afterAll(async () => {
-    // Users cascade-delete their watchlists/items; seeded instruments are left alone.
-    await prisma.user.deleteMany({});
+    // Only the emails this run itself created - never a blanket deleteMany,
+    // which would also destroy real accounts sharing this database. Users
+    // cascade-delete their watchlists/items; seeded instruments are left alone.
+    if (createdEmails.length > 0) {
+      await prisma.user.deleteMany({ where: { email: { in: createdEmails } } });
+    }
     await app.close();
   });
 
@@ -49,7 +61,7 @@ describe('Smart Watchlist backend (e2e)', () => {
   });
 
   describe('auth + users', () => {
-    const email = `e2e-${Date.now()}@example.com`;
+    const email = trackEmail(`e2e-${Date.now()}@example.com`);
     const password = 'password123';
 
     it('registers a new user', async () => {
@@ -187,8 +199,8 @@ describe('Smart Watchlist backend (e2e)', () => {
     let msftId: string;
 
     beforeAll(async () => {
-      const ownerEmail = `owner-${Date.now()}@example.com`;
-      const otherEmail = `other-${Date.now()}@example.com`;
+      const ownerEmail = trackEmail(`owner-${Date.now()}@example.com`);
+      const otherEmail = trackEmail(`other-${Date.now()}@example.com`);
       const password = 'password123';
 
       await request(server)
@@ -323,6 +335,82 @@ describe('Smart Watchlist backend (e2e)', () => {
 
       await request(server)
         .delete(`/watchlists/${watchlistId}`)
+        .set('Authorization', `Bearer ${otherToken}`)
+        .expect(404);
+    });
+
+    it('has no configured display lens by default', async () => {
+      const response = await request(server)
+        .get(`/watchlists/${watchlistId}`)
+        .set('Authorization', `Bearer ${ownerToken}`)
+        .expect(200);
+      expect(response.body.viewLens).toBeNull();
+    });
+
+    it("lets the owner set a display lens from the fixed metric catalog, without dropping the watchlist's items", async () => {
+      const response = await request(server)
+        .patch(`/watchlists/${watchlistId}/view`)
+        .set('Authorization', `Bearer ${ownerToken}`)
+        .send({ metrics: ['price', 'volume'] })
+        .expect(200);
+      expect(response.body.viewLens).toEqual(['price', 'volume']);
+      // Regression guard: an earlier version's PATCH response omitted
+      // `items`, and the frontend caches this response directly - wiping the
+      // visible item list the moment a user customizes their view.
+      expect(response.body.items).toHaveLength(1);
+
+      const watchlist = await request(server)
+        .get(`/watchlists/${watchlistId}`)
+        .set('Authorization', `Bearer ${ownerToken}`)
+        .expect(200);
+      expect(watchlist.body.viewLens).toEqual(['price', 'volume']);
+      expect(watchlist.body.items).toHaveLength(1);
+    });
+
+    it('rejects a display lens containing an unknown metric', async () => {
+      await request(server)
+        .patch(`/watchlists/${watchlistId}/view`)
+        .set('Authorization', `Bearer ${ownerToken}`)
+        .send({ metrics: ['price', 'not-a-real-metric'] })
+        .expect(400);
+    });
+
+    it('records a first-ever visit with no comparison, then a subsequent visit that reports one against it', async () => {
+      const created = await request(server)
+        .post('/watchlists')
+        .set('Authorization', `Bearer ${ownerToken}`)
+        .send({ name: 'Visit tracking' })
+        .expect(201);
+      const visitWatchlistId = created.body.id;
+      await request(server)
+        .post(`/watchlists/${visitWatchlistId}/items`)
+        .set('Authorization', `Bearer ${ownerToken}`)
+        .send({ instrumentId: aaplId })
+        .expect(201);
+
+      const firstVisit = await request(server)
+        .post(`/watchlists/${visitWatchlistId}/visits`)
+        .set('Authorization', `Bearer ${ownerToken}`)
+        .expect(200);
+      expect(firstVisit.body.previousViewedAt).toBeNull();
+      expect(firstVisit.body.items).toEqual([
+        { instrumentId: aaplId, classification: null },
+      ]);
+      expect(firstVisit.body.summary).toEqual({
+        notableCount: 0,
+        broadMarketCount: 0,
+      });
+
+      const secondVisit = await request(server)
+        .post(`/watchlists/${visitWatchlistId}/visits`)
+        .set('Authorization', `Bearer ${ownerToken}`)
+        .expect(200);
+      expect(secondVisit.body.previousViewedAt).not.toBeNull();
+    });
+
+    it('rejects taking a visit action on a watchlist owned by another user', async () => {
+      await request(server)
+        .post(`/watchlists/${watchlistId}/visits`)
         .set('Authorization', `Bearer ${otherToken}`)
         .expect(404);
     });

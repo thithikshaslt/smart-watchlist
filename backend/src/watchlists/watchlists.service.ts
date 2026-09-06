@@ -63,6 +63,19 @@ export class WatchlistsService {
     });
   }
 
+  async setViewLens(
+    userId: string,
+    watchlistId: string,
+    metrics: string[],
+  ): Promise<WatchlistWithItems> {
+    await this.getOwned(userId, watchlistId);
+    await this.prisma.watchlist.update({
+      where: { id: watchlistId },
+      data: { viewLens: metrics },
+    });
+    return this.getOwned(userId, watchlistId);
+  }
+
   async remove(userId: string, watchlistId: string): Promise<void> {
     await this.getOwned(userId, watchlistId);
     await this.prisma.watchlist.delete({ where: { id: watchlistId } });

@@ -2,6 +2,7 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { CandleInterval } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import { isMarketClosed } from '../market-hours';
 import {
   CandleIntervalKey,
   MARKET_DATA_PROVIDER,
@@ -14,9 +15,19 @@ import { WatchlistedInstrumentsService } from '../watchlisted-instruments.servic
  * Scheduled OHLCV ingestion (design.md - Market data provider: Twelve Data
  * integration). Runs on its own schedule per resolution, independent of the
  * quote priority queue, but draws from the same shared rate limiter.
+ *
+ * Intraday ingestion additionally skips entirely while the market is closed
+ * (weekends, at minimum) and, per instrument, skips the provider call when
+ * the latest stored 5-minute candle is already current - unconditionally
+ * re-fetching every watchlisted instrument every 5 minutes regardless of
+ * whether a new bar could even exist burns through a free-tier daily quota
+ * for no new data. Daily ingestion runs once a day and isn't worth the same
+ * treatment.
  */
 @Injectable()
 export class CandleIngestionService {
+  private static readonly INTRADAY_INTERVAL_MS = 5 * 60 * 1000;
+
   private readonly logger = new Logger(CandleIngestionService.name);
 
   constructor(
@@ -28,25 +39,61 @@ export class CandleIngestionService {
   ) {}
 
   @Cron(CronExpression.EVERY_5_MINUTES)
-  async ingestIntraday(): Promise<void> {
-    await this.ingestForAllWatchlisted(
-      'intraday_5m',
-      CandleInterval.intraday_5m,
-    );
+  async ingestIntraday(now: Date = new Date()): Promise<void> {
+    if (isMarketClosed(now)) {
+      return;
+    }
+
+    const instrumentIds =
+      await this.watchlistedInstruments.getDistinctInstrumentIds();
+    const due = await this.filterDueForIntraday(instrumentIds, now);
+    await this.ingestAll(due, 'intraday_5m', CandleInterval.intraday_5m);
   }
 
   @Cron('0 2 * * *')
   async ingestDaily(): Promise<void> {
-    await this.ingestForAllWatchlisted('daily', CandleInterval.daily);
+    const instrumentIds =
+      await this.watchlistedInstruments.getDistinctInstrumentIds();
+    await this.ingestAll(instrumentIds, 'daily', CandleInterval.daily);
   }
 
-  private async ingestForAllWatchlisted(
+  private async filterDueForIntraday(
+    instrumentIds: string[],
+    now: Date,
+  ): Promise<string[]> {
+    if (instrumentIds.length === 0) {
+      return [];
+    }
+
+    const latest = await this.prisma.ohlcvCandle.groupBy({
+      by: ['instrumentId'],
+      where: {
+        instrumentId: { in: instrumentIds },
+        interval: CandleInterval.intraday_5m,
+      },
+      _max: { timestamp: true },
+    });
+    const latestTimestampById = new Map(
+      latest.map((row) => [row.instrumentId, row._max.timestamp]),
+    );
+
+    return instrumentIds.filter((id) => {
+      const latestTimestamp = latestTimestampById.get(id);
+      if (!latestTimestamp) {
+        return true;
+      }
+      return (
+        now.getTime() - latestTimestamp.getTime() >=
+        CandleIngestionService.INTRADAY_INTERVAL_MS
+      );
+    });
+  }
+
+  private async ingestAll(
+    instrumentIds: string[],
     providerInterval: CandleIntervalKey,
     dbInterval: CandleInterval,
   ): Promise<void> {
-    const instrumentIds =
-      await this.watchlistedInstruments.getDistinctInstrumentIds();
-
     for (const instrumentId of instrumentIds) {
       if (!this.rateLimiter.tryAcquire()) {
         break;

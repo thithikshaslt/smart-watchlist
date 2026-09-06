@@ -7,13 +7,13 @@ describe('MarketDataService', () => {
   let service: MarketDataService;
   let prisma: {
     latestQuote: { findUnique: jest.Mock };
-    ohlcvCandle: { findMany: jest.Mock };
+    ohlcvCandle: { findMany: jest.Mock; findFirst: jest.Mock };
   };
 
   beforeEach(() => {
     prisma = {
       latestQuote: { findUnique: jest.fn() },
-      ohlcvCandle: { findMany: jest.fn() },
+      ohlcvCandle: { findMany: jest.fn(), findFirst: jest.fn() },
     };
     service = new MarketDataService(prisma as unknown as PrismaService);
   });
@@ -36,11 +36,50 @@ describe('MarketDataService', () => {
         providerTimestamp: new Date(),
         ingestedAt: new Date(),
       });
+      prisma.ohlcvCandle.findFirst.mockResolvedValue(null);
 
       const result = await service.getLatestQuote('inst-1');
 
       expect(result?.freshness).toBe('current');
       expect(result?.price).toBe(100);
+    });
+
+    it('includes day range and volume from the latest completed daily candle', async () => {
+      prisma.latestQuote.findUnique.mockResolvedValue({
+        instrumentId: 'inst-1',
+        price: 100,
+        change: 1,
+        changePercent: 1,
+        providerTimestamp: new Date(),
+        ingestedAt: new Date(),
+      });
+      prisma.ohlcvCandle.findFirst.mockResolvedValue({
+        high: 105,
+        low: 98,
+        volume: 123456,
+      });
+
+      const result = await service.getLatestQuote('inst-1');
+
+      expect(result?.dayRange).toEqual({ high: 105, low: 98 });
+      expect(result?.volume).toBe(123456);
+    });
+
+    it('reports no day range or volume when no daily candle has been ingested yet', async () => {
+      prisma.latestQuote.findUnique.mockResolvedValue({
+        instrumentId: 'inst-1',
+        price: 100,
+        change: 1,
+        changePercent: 1,
+        providerTimestamp: new Date(),
+        ingestedAt: new Date(),
+      });
+      prisma.ohlcvCandle.findFirst.mockResolvedValue(null);
+
+      const result = await service.getLatestQuote('inst-1');
+
+      expect(result?.dayRange).toBeNull();
+      expect(result?.volume).toBeNull();
     });
   });
 

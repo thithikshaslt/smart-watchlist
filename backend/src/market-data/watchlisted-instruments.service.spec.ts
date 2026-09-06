@@ -6,12 +6,16 @@ describe('WatchlistedInstrumentsService', () => {
   let prisma: {
     watchlistItem: { findMany: jest.Mock };
     latestQuote: { findMany: jest.Mock };
+    instrument: { findMany: jest.Mock };
   };
 
   beforeEach(() => {
     prisma = {
       watchlistItem: { findMany: jest.fn() },
       latestQuote: { findMany: jest.fn() },
+      // No benchmark instrument in the catalog by default, so existing
+      // tests that don't care about benchmarks see today's behavior.
+      instrument: { findMany: jest.fn().mockResolvedValue([]) },
     };
     service = new WatchlistedInstrumentsService(
       prisma as unknown as PrismaService,
@@ -31,6 +35,31 @@ describe('WatchlistedInstrumentsService', () => {
       expect(prisma.watchlistItem.findMany).toHaveBeenCalledWith(
         expect.objectContaining({ distinct: ['instrumentId'] }),
       );
+    });
+
+    it('always includes the benchmark instrument, even with an empty watchlist', async () => {
+      prisma.watchlistItem.findMany.mockResolvedValue([]);
+      prisma.instrument.findMany.mockResolvedValue([{ id: 'spy' }]);
+
+      const ids = await service.getDistinctInstrumentIds();
+
+      expect(ids).toEqual(['spy']);
+      expect(prisma.instrument.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { symbol: { in: ['SPY'] } },
+        }),
+      );
+    });
+
+    it('does not duplicate a benchmark that is also watchlisted', async () => {
+      prisma.watchlistItem.findMany.mockResolvedValue([
+        { instrumentId: 'spy' },
+      ]);
+      prisma.instrument.findMany.mockResolvedValue([{ id: 'spy' }]);
+
+      const ids = await service.getDistinctInstrumentIds();
+
+      expect(ids).toEqual(['spy']);
     });
   });
 
@@ -62,7 +91,10 @@ describe('WatchlistedInstrumentsService', () => {
       ]);
       prisma.latestQuote.findMany.mockResolvedValue([
         // 1 minute old - still fresh, should be excluded.
-        { instrumentId: 'fresh', ingestedAt: new Date(now.getTime() - 60 * 1000) },
+        {
+          instrumentId: 'fresh',
+          ingestedAt: new Date(now.getTime() - 60 * 1000),
+        },
         // 1 hour old - past the current threshold, due for refresh.
         {
           instrumentId: 'old',
@@ -82,6 +114,16 @@ describe('WatchlistedInstrumentsService', () => {
 
       expect(ids).toEqual([]);
       expect(prisma.latestQuote.findMany).not.toHaveBeenCalled();
+    });
+
+    it('still considers the benchmark instrument due for refresh with an empty watchlist', async () => {
+      prisma.watchlistItem.findMany.mockResolvedValue([]);
+      prisma.instrument.findMany.mockResolvedValue([{ id: 'spy' }]);
+      prisma.latestQuote.findMany.mockResolvedValue([]);
+
+      const ids = await service.getIdsDueForQuoteRefresh(now);
+
+      expect(ids).toEqual(['spy']);
     });
   });
 });

@@ -33,6 +33,10 @@ function InstrumentSearch({ watchlistId, existingInstrumentIds }: InstrumentSear
     onSuccess: (_data, instrumentId) => {
       setJustAddedIds((prev) => new Set(prev).add(instrumentId))
       void queryClient.invalidateQueries({ queryKey: ['watchlist', watchlistId] })
+      // Clear the search so the field is ready for the next lookup, instead
+      // of leaving the just-added result sitting there until the user
+      // manually backspaces it away.
+      setQuery('')
     },
   })
 

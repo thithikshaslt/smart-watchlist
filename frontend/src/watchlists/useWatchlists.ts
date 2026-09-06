@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiClient } from '@/lib/api-client'
-import type { Watchlist, WatchlistWithItems } from './types'
+import type { ViewLensMetric, Watchlist, WatchlistWithItems } from './types'
 
 export function watchlistsQueryKey() {
   return ['watchlists'] as const
@@ -74,6 +74,19 @@ export function useReorderWatchlistItems(watchlistId: string) {
         `/watchlists/${watchlistId}/items/reorder`,
         { instrumentIds },
       ),
+    onSuccess: (data) => {
+      queryClient.setQueryData(watchlistQueryKey(watchlistId), data)
+    },
+  })
+}
+
+export function useSetWatchlistView(watchlistId: string) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (metrics: ViewLensMetric[]) =>
+      apiClient.patch<WatchlistWithItems>(`/watchlists/${watchlistId}/view`, {
+        metrics,
+      }),
     onSuccess: (data) => {
       queryClient.setQueryData(watchlistQueryKey(watchlistId), data)
     },

@@ -11,6 +11,9 @@ export interface Quote {
   providerTimestamp: string
   ingestedAt: string
   freshness: Freshness
+  /** From the latest completed daily candle, not a live running total for today. */
+  dayRange: { high: number; low: number } | null
+  volume: number | null
 }
 
 export interface QuoteResponse {

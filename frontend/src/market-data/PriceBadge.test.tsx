@@ -13,6 +13,8 @@ const baseQuote = {
   changePercent: 1.01,
   providerTimestamp: new Date().toISOString(),
   ingestedAt: new Date().toISOString(),
+  dayRange: { high: 152, low: 148.5 },
+  volume: 1_234_567,
 }
 
 describe('PriceBadge', () => {
@@ -79,5 +81,47 @@ describe('PriceBadge', () => {
     renderWithProviders(<PriceBadge instrumentId="inst-1" />)
 
     await waitFor(() => expect(screen.getByText('No data yet')).toBeInTheDocument())
+  })
+
+  it('defaults to price, change, and freshness when no lens is configured', async () => {
+    const response: QuoteResponse = {
+      available: true,
+      quote: { ...baseQuote, freshness: 'delayed' },
+    }
+    server.use(
+      http.get('http://localhost:3000/instruments/inst-1/quote', () =>
+        HttpResponse.json(response),
+      ),
+    )
+
+    renderWithProviders(<PriceBadge instrumentId="inst-1" />)
+
+    await waitFor(() => expect(screen.getByText('$150.25')).toBeInTheDocument())
+    expect(screen.getByText('Delayed')).toBeInTheDocument()
+    expect(screen.queryByText(/Vol:/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/Range:/)).not.toBeInTheDocument()
+  })
+
+  it('renders only the metrics selected by a customized lens', async () => {
+    const response: QuoteResponse = {
+      available: true,
+      quote: { ...baseQuote, freshness: 'delayed' },
+    }
+    server.use(
+      http.get('http://localhost:3000/instruments/inst-1/quote', () =>
+        HttpResponse.json(response),
+      ),
+    )
+
+    renderWithProviders(
+      <PriceBadge instrumentId="inst-1" viewLens={['volume', 'dayRange']} />,
+    )
+
+    await waitFor(() =>
+      expect(screen.getByText('Vol: 1,234,567')).toBeInTheDocument(),
+    )
+    expect(screen.getByText('Range: $148.50–$152.00')).toBeInTheDocument()
+    expect(screen.queryByText('$150.25')).not.toBeInTheDocument()
+    expect(screen.queryByText('Delayed')).not.toBeInTheDocument()
   })
 })

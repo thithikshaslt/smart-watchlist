@@ -7,5 +7,6 @@ import { WatchlistsService } from './watchlists.service';
   imports: [InstrumentsModule],
   controllers: [WatchlistsController],
   providers: [WatchlistsService],
+  exports: [WatchlistsService],
 })
 export class WatchlistsModule {}

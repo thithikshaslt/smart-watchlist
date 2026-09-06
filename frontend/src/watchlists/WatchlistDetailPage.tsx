@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
   closestCenter,
   DndContext,
@@ -19,8 +19,13 @@ import ErrorState from '@/components/ErrorState'
 import LoadingState from '@/components/LoadingState'
 import InstrumentSearch from '@/instruments/InstrumentSearch'
 import { ApiError } from '@/lib/api-client'
+import { useWatchlistVisit } from '@/smart-insights/useWatchlistVisit'
+import type { VisitItemResult } from '@/smart-insights/useWatchlistVisit'
+import VisitDigest from '@/smart-insights/VisitDigest'
 import { useRemoveWatchlistItem, useWatchlist } from './useWatchlists'
 import { useWatchlistReorder } from './useWatchlistReorder'
+import { useWatchlistViewLens } from './useWatchlistViewLens'
+import ViewLensControl from './ViewLensControl'
 import WatchlistItemRow from './WatchlistItemRow'
 import type { WatchlistItem } from './types'
 
@@ -44,6 +49,28 @@ function WatchlistDetailPage() {
     watchlistId,
     persistedItems,
   )
+  const { viewLens, toggleMetric } = useWatchlistViewLens(watchlistId, watchlist?.viewLens)
+
+  const visit = useWatchlistVisit(watchlistId)
+  const { mutate: recordVisit } = visit
+  useEffect(() => {
+    if (!watchlistId) {
+      return
+    }
+    recordVisit()
+    // Fires once per genuine navigation to this watchlist (mount), keyed
+    // only on watchlistId - deliberately not re-run by the polling query
+    // that keeps prices fresh, or by any other re-render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [watchlistId])
+
+  const classificationByInstrumentId = useMemo(() => {
+    const map = new Map<string, VisitItemResult['classification']>()
+    for (const result of visit.data?.items ?? []) {
+      map.set(result.instrumentId, result.classification)
+    }
+    return map
+  }, [visit.data])
 
   const sensors = useSensors(
     useSensor(PointerSensor),
@@ -100,13 +127,18 @@ function WatchlistDetailPage() {
   }
 
   return (
-    <div className="mx-auto max-w-2xl space-y-6 p-6">
-      <header>
-        <Link to="/watchlists" className="text-sm text-muted-foreground underline">
+    <div className="mx-auto max-w-2xl space-y-5 p-6">
+      <header className="space-y-3">
+        <Link to="/watchlists" className="text-sm text-muted-foreground hover:text-foreground">
           ← Your watchlists
         </Link>
-        <h1 className="text-xl font-semibold">{watchlist.name}</h1>
+        <div className="flex items-center justify-between">
+          <h1 className="text-2xl font-semibold tracking-tight">{watchlist.name}</h1>
+          <ViewLensControl viewLens={viewLens} onToggleMetric={toggleMetric} />
+        </div>
       </header>
+
+      <VisitDigest previousViewedAt={visit.data?.previousViewedAt} summary={visit.data?.summary} />
 
       {reorderFailed && (
         <ErrorState message="Couldn't save the new order. Please try again." />
@@ -124,7 +156,7 @@ function WatchlistDetailPage() {
             items={items.map((item) => item.instrumentId)}
             strategy={verticalListSortingStrategy}
           >
-            <ul className="rounded-md border">
+            <ul className="overflow-hidden rounded-lg border">
               {items.map((item) => (
                 <WatchlistItemRow
                   key={item.instrumentId}
@@ -132,6 +164,8 @@ function WatchlistDetailPage() {
                   isExpanded={expandedIds.has(item.instrumentId)}
                   onToggleExpand={toggleExpand}
                   onRemove={(instrumentId) => removeItem.mutate(instrumentId)}
+                  viewLens={viewLens}
+                  classification={classificationByInstrumentId.get(item.instrumentId)}
                 />
               ))}
             </ul>
@@ -140,7 +174,7 @@ function WatchlistDetailPage() {
       )}
 
       <section className="space-y-2">
-        <h2 className="text-sm font-medium">Add an instrument</h2>
+        <h2 className="text-sm font-medium text-muted-foreground">Add an instrument</h2>
         <InstrumentSearch
           watchlistId={watchlistId}
           existingInstrumentIds={persistedItems.map((item) => item.instrumentId)}

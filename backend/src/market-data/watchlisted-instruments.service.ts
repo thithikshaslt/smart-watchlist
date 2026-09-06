@@ -1,17 +1,35 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { BENCHMARK_SYMBOLS } from './benchmark-instruments';
 import { CURRENT_THRESHOLD_MS } from './freshness';
 
 @Injectable()
 export class WatchlistedInstrumentsService {
   constructor(private readonly prisma: PrismaService) {}
 
+  /**
+   * Distinct instrument IDs that should stay ingested: every instrument
+   * present in at least one watchlist, plus the fixed benchmark set (see
+   * benchmark-instruments.ts) - a benchmark must stay fresh for smart-insights
+   * even when no user has watchlisted it.
+   */
   async getDistinctInstrumentIds(): Promise<string[]> {
-    const rows = await this.prisma.watchlistItem.findMany({
-      distinct: ['instrumentId'],
-      select: { instrumentId: true },
-    });
-    return rows.map((row) => row.instrumentId);
+    const [watchlisted, benchmarks] = await Promise.all([
+      this.prisma.watchlistItem.findMany({
+        distinct: ['instrumentId'],
+        select: { instrumentId: true },
+      }),
+      this.prisma.instrument.findMany({
+        where: { symbol: { in: BENCHMARK_SYMBOLS } },
+        select: { id: true },
+      }),
+    ]);
+
+    const ids = new Set(watchlisted.map((row) => row.instrumentId));
+    for (const benchmark of benchmarks) {
+      ids.add(benchmark.id);
+    }
+    return [...ids];
   }
 
   /**
